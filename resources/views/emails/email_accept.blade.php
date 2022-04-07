@@ -1,0 +1,1 @@
+Confirmação da transação entre {{ $payer->name }} e {{ $payee->name }}, no valor de {{ $transaction->value }}
