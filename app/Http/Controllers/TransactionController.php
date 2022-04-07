@@ -6,6 +6,8 @@ use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Requests\UpdateTransactionRequest;
 use App\Models\Transaction;
 use App\Models\Client;
+use Mail;
+use App\Mail\TransactionAcceptEmail;
 
 class TransactionController extends Controller
 {
@@ -32,7 +34,7 @@ class TransactionController extends Controller
             return ['message' => 'valor na carteira insuficiente'];
         }elseif($payer->id == $payee->id){
             //transação não pode ser feita entre a mesma pessoa
-            return ['message' => 'valor na carteira insuficiente'];
+            return ['message' => 'transação não pode ser feita entre a mesma pessoa'];
         }
 
         $payer['wallet'] = $payer['wallet'] - $validated['value'];
@@ -43,6 +45,9 @@ class TransactionController extends Controller
         
         $transaction = Transaction::create($validated);
         $transaction->save();
+
+        //Mail::queue(new TransactionAcceptEmail($transaction));
+
         return $transaction;
     }
 
