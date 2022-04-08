@@ -11,9 +11,56 @@ use App\Mail\TransactionAcceptEmail;
 
 class TransactionController extends Controller
 {
-    public function index()
+    public function validation($payer, $payee, $validated)
     {
-        //
+        $message = '';
+
+        if(!isset($payer['id'], $payee['id'])){
+            $message = 'pagante e(ou) recebedor não cadastrado(s)';       
+        }elseif($payer['type'] == 1){
+            $message = 'lojista não pode efetuar transações';
+        }elseif($payer['wallet'] < $validated['value']){
+            $message = 'valor na carteira insuficiente';
+        }elseif($payer['id'] == $payee['id']){
+            $message = 'transação não pode ser feita entre a mesma pessoa';
+        }
+
+        return ['message' => $message];
+    }
+
+    public function sum($person, $validated)
+    {
+        return $person['wallet'] + $validated['value'];
+    } 
+
+    public function sub($person, $validated)
+    {
+        return $person['wallet'] - $validated['value'];   
+    }
+
+    public function controlWallet($person, $validated, $type)
+    {
+        if($type == '+'){
+            $person['wallet'] = $this->sum($person, $validated);
+        }else{
+            $person['wallet'] = $this->sub($person, $validated);
+        }
+            $person->save();
+            return $person;
+    }
+
+    public function sendEmail(){
+        try {
+            //controller email
+            //Mail::queue(new TransactionAcceptEmail($transaction));
+            $response = file_get_contents('http://o4d9z.mocklab.io/notify');
+            $response = json_decode($response, true);
+            if($response['message'] !== 'Success'){            
+                throw new Exception("Email não enviado", 500);  
+            }
+        } catch (\Throwable $th) {
+            //throw deve ser enviado uma menssagem de erro para o sentry;
+        }
     }
 
     public function store(StoreTransactionRequest $request)
@@ -23,37 +70,30 @@ class TransactionController extends Controller
         $payer = Client::where('id', $validated['payer'])->first();
         $payee = Client::where('id', $validated['payee'])->first();
 
-        if(!isset($payer->id, $payee->id)){
-            //usuario não foi encontrado
-            return ['message' => 'pagante e(ou) recebedor não cadastrado(s)'];
-        }elseif($payer->type == 1){
-            //tipo "1" = lojista, não pode fazer transações
-            return ['message' => 'lojista não pode efetuar transações'];
-        }elseif($payer->wallet < $validated['value']){
-            //valor insuficiente para a transação
-            return ['message' => 'valor na carteira insuficiente'];
-        }elseif($payer->id == $payee->id){
-            //transação não pode ser feita entre a mesma pessoa
-            return ['message' => 'transação não pode ser feita entre a mesma pessoa'];
+        $error = $this->validation($payer, $payee, $validated);
+
+        if($error['message'] !== ''){
+            return $error;
         }
 
-        $payer['wallet'] = $payer['wallet'] - $validated['value'];
-        $payer->save();
+        $response = file_get_contents('https://run.mocky.io/v3/8fafdd68-a090-496f-8c9a-3442cf30dae6');
+        $response = json_decode($response, true);
 
-        $payee['wallet'] = $payee['wallet'] + $validated['value'];
-        $payee->save();
+        if($response['message'] !== 'Autorizado'){
+            return ['message' => 'operação'];
+        }
+
+        $this->controlWallet($payer, $validated, '-');
+
+        $this->controlWallet($payee, $validated, '+');
+
+        $this->sendEmail();
         
         $transaction = Transaction::create($validated);
         $transaction->save();
 
-        //Mail::queue(new TransactionAcceptEmail($transaction));
-
         return $transaction;
-    }
-
-    public function show(Transaction $transaction)
-    {
-        //
+           
     }
 
     public function update(UpdateTransactionRequest $request, Transaction $transaction)
@@ -64,24 +104,15 @@ class TransactionController extends Controller
         $payee = Client::where('id', $transaction['payee'])->first();
 
         if($validated['status'] == 1 && $transaction['status'] == 1){
-            //se o status já está como 1(negado) não pode ser alterado novamente
             return ['message' => 'transação já está negada'];
         }else{
-            //status 0 transação aprovada, status 1 transação negada
-            $payer['wallet'] = $payer['wallet'] + $transaction['value'];
-            $payer->save();
-    
-            $payee['wallet'] = $payee['wallet'] - $transaction['value'];
-            $payee->save();
+            $this->controlWallet($payer, $transaction, '+');
+
+            $this->controlWallet($payee, $transaction, '-');
             
             $transaction['status'] = $validated['status'];
             $transaction->save();
             return $transaction;
         }
-    }
-
-    public function destroy(Transaction $transaction)
-    {
-        //
     }
 }
